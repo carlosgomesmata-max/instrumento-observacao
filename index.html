@@ -32,19 +32,23 @@
             background-color: #374151;
             border-color: #4B5563;
         }
-        .variable-input {
+        .variable-input, .phase-input {
             background-color: transparent;
             border: none;
             color: white;
-            font-weight: 500;
             padding: 2px 4px;
             border-radius: 4px;
             width: 100%;
         }
-        .variable-input:focus {
+        .variable-input:focus, .phase-input:focus {
             background-color: #4B5563;
             outline: none;
             box-shadow: 0 0 0 2px #22D3EE;
+        }
+         .phase-input {
+            font-size: 1.125rem; /* text-lg */
+            font-weight: 600; /* font-semibold */
+            color: #67E8F9; /* text-cyan-300 */
         }
 
         /* Print Styles */
@@ -91,7 +95,7 @@
     <main class="flex-grow flex flex-col md:flex-row overflow-hidden">
         
         <!-- Left Panel: Media Viewer -->
-        <div class="w-full md:w-2/3 flex flex-col bg-gray-900 p-4 lg:p-6 overflow-y-auto">
+        <div class="w-full md:w-2/3 flex flex-col bg-gray-900 p-4 lg:p-6 h-1/2 md:h-full">
             <!-- File Inputs -->
             <div class="flex flex-col sm:flex-row gap-4 mb-4">
                 <div class="flex-1">
@@ -105,7 +109,7 @@
             </div>
 
             <!-- Main Media Display -->
-            <div id="media-display-container" class="flex-grow bg-gray-800 rounded-xl flex items-center justify-center placeholder-bg min-h-[300px] md:min-h-[400px]">
+            <div id="media-display-container" class="flex-grow bg-gray-800 rounded-xl flex items-center justify-center placeholder-bg min-h-[150px] md:min-h-[400px]">
                 <div id="placeholder-text" class="text-center text-gray-500">
                     <svg class="mx-auto h-12 w-12" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.55a2 2 0 01.35 3.62l-4.2 3.15a2 2 0 01-3.1-.37l-3.3-4.4a2 2 0 01.1-2.73l4.5-4.5a2 2 0 012.83 0zM4 10l2.5-2.5a2 2 0 012.83 0l4.5 4.5a2 2 0 01-2.83 2.83L8 12m0 0l-4 4"></path></svg>
                     <p class="mt-2 text-lg font-semibold">A sua mídia aparecerá aqui</p>
@@ -125,7 +129,7 @@
         </div>
 
         <!-- Right Panel: Evaluation Form & Results -->
-        <div class="w-full md:w-1/3 flex flex-col bg-gray-800 border-l border-gray-700">
+        <div class="w-full md:w-1/3 flex flex-col bg-gray-800 border-t-2 md:border-t-0 md:border-l border-gray-700 h-1/2 md:h-full">
             <!-- Evaluation Form -->
             <div id="evaluation-panel" class="p-4 lg:p-6 space-y-4 overflow-y-auto flex-grow">
                 <h2 class="text-xl font-bold text-cyan-400 pb-2 border-b border-gray-700">Painel de Avaliação</h2>
@@ -150,6 +154,11 @@
 
                 <div id="evaluation-structure" class="space-y-6">
                     <!-- A estrutura de avaliação será gerada por JavaScript aqui -->
+                </div>
+                 <div class="pt-2">
+                    <button id="add-dimension-btn" class="w-full py-2 px-4 border-2 border-dashed border-gray-600 hover:border-cyan-400 hover:text-cyan-400 rounded-lg font-semibold text-gray-400 transition-colors duration-200">
+                        + Adicionar Dimensão
+                    </button>
                 </div>
 
                 <div class="pt-4 space-y-3">
@@ -194,6 +203,7 @@
             const athleteNameInput = document.getElementById('athlete-name');
             const evalDateInput = document.getElementById('eval-date');
             const observerNameInput = document.getElementById('observer-name');
+            const addDimensionBtn = document.getElementById('add-dimension-btn');
 
             let mediaFiles = [];
             let activeMediaIndex = -1;
@@ -201,6 +211,18 @@
             let analysisDataStore = new Map();
 
             evalDateInput.valueAsDate = new Date();
+            
+            const defaultBodyParts = ['Pés', 'Perna Direita', 'Perna Esquerda', 'Tronco', 'Braço Direito', 'Braço Esquerdo', 'Cabeça'];
+            const createInitialState = () => ({
+                athlete: '',
+                date: new Date().toISOString().substring(0, 10),
+                observer: '',
+                evaluations: [
+                    { name: 'Fase Inicial', variables: defaultBodyParts.map(p => ({ name: p, status: 'none' })) },
+                    { name: 'Fase Intermédia', variables: defaultBodyParts.map(p => ({ name: p, status: 'none' })) },
+                    { name: 'Fase de Impacto', variables: defaultBodyParts.map(p => ({ name: p, status: 'none' })) }
+                ]
+            });
 
             // --- Media Handling ---
             videoUpload.addEventListener('change', (e) => handleFileUpload(e.target.files[0], 'video'));
@@ -236,74 +258,110 @@
 
             function setActiveMedia(index) {
                 if (index < 0 || index >= mediaFiles.length || index === activeMediaIndex) return;
-                if (activeMediaIndex !== -1) analysisDataStore.set(activeMediaIndex, collectCurrentState());
+
+                // 1. Save the state of the media we are leaving (if there is one)
+                if (activeMediaIndex !== -1) {
+                    analysisDataStore.set(activeMediaIndex, collectCurrentState());
+                }
+
+                // 2. Set the new active index
                 activeMediaIndex = index;
+
+                // 3. Check if the new media already has a saved state. If not, create one based on the current form structure.
+                if (!analysisDataStore.has(activeMediaIndex)) {
+                    const currentFormState = collectCurrentState();
+                    
+                    // Create a clean version of the structure for the new media file, resetting values
+                    const newMediaEvaluations = currentFormState.evaluations.map(phase => ({
+                        name: phase.name,
+                        variables: phase.variables.map(variable => ({
+                            name: variable.name,
+                            status: 'none' // Reset the status to 'none' for the new media
+                        }))
+                    }));
+
+                    // Set the initial state for the new media file, carrying over ID fields for convenience
+                    analysisDataStore.set(activeMediaIndex, {
+                        athlete: currentFormState.athlete, 
+                        date: currentFormState.date,
+                        observer: currentFormState.observer,
+                        evaluations: newMediaEvaluations
+                    });
+                }
+
+                // 4. Apply the state for the newly active media
+                applyState(analysisDataStore.get(activeMediaIndex));
+
+                // 5. Update UI (display media, highlight thumbnail, etc.)
                 const media = mediaFiles[index];
                 placeholderText.classList.add('hidden');
                 videoPlayer.classList.toggle('hidden', media.type !== 'video');
                 imageViewer.classList.toggle('hidden', media.type !== 'image');
-                if (media.type === 'video') videoPlayer.src = media.url;
-                else imageViewer.src = media.url;
-                applyState(analysisDataStore.get(activeMediaIndex));
+                if (media.type === 'video') {
+                    videoPlayer.src = media.url;
+                } else {
+                    imageViewer.src = media.url;
+                }
                 renderThumbnails();
             }
 
             // --- Evaluation Form Handling ---
-            const phases = [ 'Fase Inicial', 'Fase Intermédia', 'Fase de Impacto' ];
-            const defaultBodyParts = ['Pés', 'Perna Direita', 'Perna Esquerda', 'Tronco', 'Braço Direito', 'Braço Esquerdo', 'Cabeça'];
-
             function createVariableRow(name = '', status = 'none') {
                 const partDiv = document.createElement('div');
                 partDiv.className = 'body-part p-2 bg-gray-700 rounded-lg flex items-center gap-2';
-                
                 const input = document.createElement('input');
                 input.type = 'text';
                 input.className = 'variable-input flex-grow text-sm';
                 input.value = name;
-
                 const buttonGroup = document.createElement('div');
                 buttonGroup.className = 'flex gap-2 button-group flex-shrink-0';
-                
                 const noErrorBtn = document.createElement('button');
-                noErrorBtn.className = 'eval-button no-error-btn px-3 py-1 text-xs font-bold rounded-md bg-gray-600 hover:bg-green-500/50 text-gray-200 transition-colors';
+                noErrorBtn.className = `eval-button no-error-btn px-3 py-1 text-xs font-bold rounded-md bg-gray-600 hover:bg-green-500/50 text-gray-200 transition-colors ${status === 'ok' ? 'selected-ok' : ''}`;
                 noErrorBtn.textContent = 'S/ Erro';
-                if (status === 'ok') noErrorBtn.classList.add('selected-ok');
-
                 const errorBtn = document.createElement('button');
-                errorBtn.className = 'eval-button error-btn px-3 py-1 text-xs font-bold rounded-md bg-gray-600 hover:bg-red-500/50 text-gray-200 transition-colors';
+                errorBtn.className = `eval-button error-btn px-3 py-1 text-xs font-bold rounded-md bg-gray-600 hover:bg-red-500/50 text-gray-200 transition-colors ${status === 'error' ? 'selected-error' : ''}`;
                 errorBtn.textContent = 'Erro';
-                if (status === 'error') errorBtn.classList.add('selected-error');
-                
                 buttonGroup.append(noErrorBtn, errorBtn);
-
                 const deleteBtn = document.createElement('button');
                 deleteBtn.className = 'delete-variable-btn text-gray-400 hover:text-red-400 flex-shrink-0';
                 deleteBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" /></svg>';
-
                 partDiv.append(input, buttonGroup, deleteBtn);
                 return partDiv;
             }
 
-            function buildEvaluationForm() {
-                phases.forEach(phaseName => {
+            function renderEvaluationForm(evaluations) {
+                evaluationStructure.innerHTML = '';
+                evaluations.forEach((phase) => {
                     const phaseDiv = document.createElement('div');
                     phaseDiv.className = 'phase-section';
-                    const phaseTitle = document.createElement('h3');
-                    phaseTitle.className = 'text-lg font-semibold text-cyan-300 mb-2';
-                    phaseTitle.textContent = phaseName;
+
+                    const titleContainer = document.createElement('div');
+                    titleContainer.className = 'flex items-center gap-2 mb-2';
+                    const phaseInput = document.createElement('input');
+                    phaseInput.type = 'text';
+                    phaseInput.className = 'phase-input flex-grow';
+                    phaseInput.value = phase.name;
+                    const deletePhaseBtn = document.createElement('button');
+                    deletePhaseBtn.className = 'delete-phase-btn text-gray-500 hover:text-red-400';
+                    deletePhaseBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>';
+                    titleContainer.append(phaseInput, deletePhaseBtn);
+                    
                     const partsContainer = document.createElement('div');
                     partsContainer.className = 'parts-container space-y-2';
-                    defaultBodyParts.forEach(partName => partsContainer.appendChild(createVariableRow(partName)));
+                    phase.variables.forEach(variable => partsContainer.appendChild(createVariableRow(variable.name, variable.status)));
+                    
                     const addBtn = document.createElement('button');
                     addBtn.className = 'add-variable-btn mt-2 text-sm text-cyan-400 hover:text-cyan-300 w-full text-left';
                     addBtn.textContent = '+ Adicionar Variável';
-                    phaseDiv.append(phaseTitle, partsContainer, addBtn);
+                    
+                    phaseDiv.append(titleContainer, partsContainer, addBtn);
                     evaluationStructure.appendChild(phaseDiv);
                 });
             }
 
             evaluationStructure.addEventListener('click', (e) => {
-                const evalButton = e.target.closest('.eval-button');
+                const target = e.target;
+                const evalButton = target.closest('.eval-button');
                 if (evalButton) {
                     const group = evalButton.parentElement;
                     const isSelected = evalButton.classList.contains('selected-ok') || evalButton.classList.contains('selected-error');
@@ -313,35 +371,37 @@
                         evalButton.classList.add(evalButton.classList.contains('no-error-btn') ? 'selected-ok' : 'selected-error');
                     }
                 }
-                const deleteButton = e.target.closest('.delete-variable-btn');
-                if (deleteButton) {
-                    deleteButton.parentElement.remove();
-                }
-                const addButton = e.target.closest('.add-variable-btn');
-                if (addButton) {
-                    addButton.previousElementSibling.appendChild(createVariableRow('Nova Variável'));
-                }
+                if (target.closest('.delete-variable-btn')) target.closest('.body-part').remove();
+                if (target.closest('.add-variable-btn')) target.closest('.add-variable-btn').previousElementSibling.appendChild(createVariableRow('Nova Variável'));
+                if (target.closest('.delete-phase-btn')) target.closest('.phase-section').remove();
             });
 
-            buildEvaluationForm();
+            addDimensionBtn.addEventListener('click', () => {
+                const currentState = collectCurrentState();
+                currentState.evaluations.push({ name: 'Nova Dimensão', variables: [{ name: 'Nova Variável', status: 'none' }] });
+                renderEvaluationForm(currentState.evaluations);
+            });
             
             function collectCurrentState() {
                 const state = {
                     athlete: athleteNameInput.value,
                     date: evalDateInput.value,
                     observer: observerNameInput.value,
-                    evaluations: {}
+                    evaluations: []
                 };
-                evaluationStructure.querySelectorAll('.phase-section').forEach((phaseEl, i) => {
-                    const phaseName = phases[i];
-                    state.evaluations[phaseName] = [];
+                evaluationStructure.querySelectorAll('.phase-section').forEach(phaseEl => {
+                    const phaseData = {
+                        name: phaseEl.querySelector('.phase-input').value,
+                        variables: []
+                    };
                     phaseEl.querySelectorAll('.body-part').forEach(partEl => {
                         const name = partEl.querySelector('.variable-input').value;
                         let status = 'none';
                         if(partEl.querySelector('.no-error-btn').classList.contains('selected-ok')) status = 'ok';
                         else if(partEl.querySelector('.error-btn').classList.contains('selected-error')) status = 'error';
-                        state.evaluations[phaseName].push({ name, status });
+                        phaseData.variables.push({ name, status });
                     });
+                    state.evaluations.push(phaseData);
                 });
                 return state;
             }
@@ -350,15 +410,11 @@
                 athleteNameInput.value = state?.athlete || '';
                 evalDateInput.value = state?.date || new Date().toISOString().substring(0, 10);
                 observerNameInput.value = state?.observer || '';
-                
-                evaluationStructure.querySelectorAll('.phase-section').forEach((phaseEl, i) => {
-                    const phaseName = phases[i];
-                    const container = phaseEl.querySelector('.parts-container');
-                    container.innerHTML = '';
-                    const evalItems = state?.evaluations?.[phaseName] || defaultBodyParts.map(name => ({name, status: 'none'}));
-                    evalItems.forEach(item => container.appendChild(createVariableRow(item.name, item.status)));
-                });
+                renderEvaluationForm(state.evaluations);
             }
+            
+            // Initialize with default form if no media is loaded yet
+            applyState(createInitialState());
 
             // --- Results Handling ---
             function generateResults() {
@@ -385,14 +441,14 @@
 
                 const chartData = { labels: [], datasets: [ { label: 'S/ Erro', data: [], backgroundColor: '#10B981', barThickness: 25 }, { label: 'Erro', data: [], backgroundColor: '#EF4444', barThickness: 25 }, { label: 'Não Avaliado', data: [], backgroundColor: '#6B7280', barThickness: 25 } ]};
 
-                for (const phaseName in currentState.evaluations) {
-                    chartData.labels.push(phaseName);
+                currentState.evaluations.forEach(phase => {
+                    chartData.labels.push(phase.name);
                     const counts = { ok: 0, error: 0, none: 0 };
-                    currentState.evaluations[phaseName].forEach(item => counts[item.status]++);
+                    phase.variables.forEach(item => counts[item.status]++);
                     chartData.datasets[0].data.push(counts.ok);
                     chartData.datasets[1].data.push(counts.error);
                     chartData.datasets[2].data.push(counts.none);
-                }
+                });
                 
                 resultsChart = new Chart(canvas.getContext('2d'), { type: 'bar', data: chartData, options: { responsive: true, scales: { x: { stacked: true, ticks: { color: '#D1D5DB' } }, y: { stacked: true, beginAtZero: true, ticks: { color: '#D1D5DB', stepSize: 1 } } }, plugins: { legend: { labels: { color: '#D1D5DB' } }, title: { display: true, text: 'Resumo Gráfico por Fase', color: '#D1D5DB', font: { size: 16 } } } }});
 
@@ -401,13 +457,13 @@
                 title.textContent = `Resultados Detalhados para: ${mediaFiles[activeMediaIndex].name}`;
                 resultsContent.appendChild(title);
 
-                for (const phaseName in currentState.evaluations) {
+                currentState.evaluations.forEach(phase => {
                     const phaseTitle = document.createElement('h4');
                     phaseTitle.className = "text-md font-semibold text-gray-100 mt-3";
-                    phaseTitle.textContent = phaseName;
+                    phaseTitle.textContent = phase.name;
                     const list = document.createElement('ul');
                     list.className = 'list-disc list-inside mt-1 space-y-1 text-sm';
-                    currentState.evaluations[phaseName].forEach(item => {
+                    phase.variables.forEach(item => {
                         let status;
                         if(item.status === 'ok') status = '<span class="text-green-400 font-semibold">S/ Erro</span>';
                         else if(item.status === 'error') status = '<span class="text-red-400 font-semibold">Erro</span>';
@@ -417,7 +473,7 @@
                         list.appendChild(listItem);
                     });
                     resultsContent.append(phaseTitle, list);
-                }
+                });
                 return true;
             }
 
@@ -431,10 +487,8 @@
             saveResultsBtn.addEventListener('click', () => {
                 const resultsGenerated = generateResults();
                 if(resultsGenerated) {
-                    // Temporarily show the results panel for printing
                     resultsPanel.classList.remove('hidden');
                     window.print();
-                    // Hide it again if the evaluation panel was the active one
                     if (!evaluationPanel.classList.contains('hidden')) {
                          resultsPanel.classList.add('hidden');
                     }
@@ -450,5 +504,3 @@
     </script>
 </body>
 </html>
-
-
