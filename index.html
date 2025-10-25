@@ -1,4 +1,6 @@
-
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Instrumento de Observação Técnica e Tática (by Carlos Mata)</title>
@@ -18,19 +20,26 @@
         .placeholder-bg {
             background-image: url("data:image/svg+xml,%3csvg width='100%25' height='100%25' xmlns='http://www.w3.org/2000/svg'%3e%3crect width='100%25' height='100%25' fill='none' rx='12' ry='12' stroke='%234A5568FF' stroke-width='2' stroke-dasharray='6%2c 14' stroke-dashoffset='0' stroke-linecap='square'/%3e%3c/svg%3e");
         }
-        .eval-button.selected-ok {
-            background-color: #10B981; color: white;
-            box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
+        
+        .eval-button.selected {
+            opacity: 1;
+            box-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
+            transform: scale(1.05);
         }
-        .eval-button.selected-error {
-            background-color: #EF4444; color: white;
-            box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
-        }
-        input[type="text"], input[type="date"] {
+
+        input[type="text"], input[type="date"], input[type="color"] {
             background-color: #374151;
             border-color: #4B5563;
         }
-        .variable-input, .phase-input {
+        input[type="color"] {
+            padding: 0;
+            width: 2.5rem; /* 40px */
+            height: 2.5rem; /* 40px */
+            border-radius: 0.375rem; /* rounded-md */
+            cursor: pointer;
+        }
+        
+        .variable-input, .phase-input, .option-input {
             background-color: transparent;
             border: none;
             color: white;
@@ -38,7 +47,7 @@
             border-radius: 4px;
             width: 100%;
         }
-        .variable-input:focus, .phase-input:focus {
+        .variable-input:focus, .phase-input:focus, .option-input:focus {
             background-color: #4B5563;
             outline: none;
             box-shadow: 0 0 0 2px #22D3EE;
@@ -69,8 +78,12 @@
             #results-panel h2, #results-panel h3, #results-panel h4 {
                 color: black !important;
             }
-            #results-panel span {
+            #results-panel span, #results-panel p, #results-panel li {
                  color: black !important;
+            }
+            #results-panel canvas {
+                display: block !important;
+                max-width: 100% !important;
             }
             #back-to-eval-btn {
                 display: none;
@@ -207,20 +220,36 @@
             let activeMediaIndex = -1;
             let resultsChart = null; 
             let analysisDataStore = new Map();
+            let colorDebounceTimer;
 
             evalDateInput.valueAsDate = new Date();
             
             const defaultBodyParts = ['Pés', 'Perna Direita', 'Perna Esquerda', 'Tronco', 'Braço Direito', 'Braço Esquerdo', 'Cabeça'];
+            const defaultOptions = [
+                { name: 'S/ Erro', color: '#10B981' }, // green-500
+                { name: 'Erro', color: '#EF4444' }    // red-500
+            ];
+
             const createInitialState = () => ({
                 athlete: '',
                 date: new Date().toISOString().substring(0, 10),
                 observer: '',
                 evaluations: [
-                    { name: 'Fase Inicial', variables: defaultBodyParts.map(p => ({ name: p, status: 'none' })) },
-                    { name: 'Fase Intermédia', variables: defaultBodyParts.map(p => ({ name: p, status: 'none' })) },
-                    { name: 'Fase de Impacto', variables: defaultBodyParts.map(p => ({ name: p, status: 'none' })) }
+                    { name: 'Fase Inicial', options: JSON.parse(JSON.stringify(defaultOptions)), variables: defaultBodyParts.map(p => ({ name: p, status: 'none' })) },
+                    { name: 'Fase Intermédia', options: JSON.parse(JSON.stringify(defaultOptions)), variables: defaultBodyParts.map(p => ({ name: p, status: 'none' })) },
+                    { name: 'Fase de Impacto', options: JSON.parse(JSON.stringify(defaultOptions)), variables: defaultBodyParts.map(p => ({ name: p, status: 'none' })) }
                 ]
             });
+            
+            // --- Random Color Generator ---
+            function getRandomColor() {
+                const letters = '0123456789ABCDEF';
+                let color = '#';
+                for (let i = 0; i < 6; i++) {
+                    color += letters[Math.floor(Math.random() * 16)];
+                }
+                return color;
+            }
 
             // --- Media Handling ---
             videoUpload.addEventListener('change', (e) => handleFileUpload(e.target.files[0], 'video'));
@@ -257,28 +286,24 @@
             function setActiveMedia(index) {
                 if (index < 0 || index >= mediaFiles.length || index === activeMediaIndex) return;
 
-                // 1. Save the state of the media we are leaving (if there is one)
                 if (activeMediaIndex !== -1) {
                     analysisDataStore.set(activeMediaIndex, collectCurrentState());
                 }
 
-                // 2. Set the new active index
                 activeMediaIndex = index;
 
-                // 3. Check if the new media already has a saved state. If not, create one based on the current form structure.
                 if (!analysisDataStore.has(activeMediaIndex)) {
                     const currentFormState = collectCurrentState();
                     
-                    // Create a clean version of the structure for the new media file, resetting values
                     const newMediaEvaluations = currentFormState.evaluations.map(phase => ({
                         name: phase.name,
+                        options: JSON.parse(JSON.stringify(phase.options)), // Copia as opções personalizadas
                         variables: phase.variables.map(variable => ({
                             name: variable.name,
-                            status: 'none' // Reset the status to 'none' for the new media
+                            status: 'none'
                         }))
                     }));
 
-                    // Set the initial state for the new media file, carrying over ID fields for convenience
                     analysisDataStore.set(activeMediaIndex, {
                         athlete: currentFormState.athlete, 
                         date: currentFormState.date,
@@ -286,11 +311,9 @@
                         evaluations: newMediaEvaluations
                     });
                 }
-
-                // 4. Apply the state for the newly active media
+                
                 applyState(analysisDataStore.get(activeMediaIndex));
 
-                // 5. Update UI (display media, highlight thumbnail, etc.)
                 const media = mediaFiles[index];
                 placeholderText.classList.add('hidden');
                 videoPlayer.classList.toggle('hidden', media.type !== 'video');
@@ -304,37 +327,66 @@
             }
 
             // --- Evaluation Form Handling ---
-            function createVariableRow(name = '', status = 'none') {
+            function createVariableRow(name = '', status = 'none', options) {
                 const partDiv = document.createElement('div');
                 partDiv.className = 'body-part p-2 bg-gray-700 rounded-lg flex items-center gap-2';
                 const input = document.createElement('input');
                 input.type = 'text';
                 input.className = 'variable-input flex-grow text-sm';
                 input.value = name;
+                
                 const buttonGroup = document.createElement('div');
                 buttonGroup.className = 'flex gap-2 button-group flex-shrink-0';
-                const noErrorBtn = document.createElement('button');
-                noErrorBtn.className = `eval-button no-error-btn px-3 py-1 text-xs font-bold rounded-md bg-gray-600 hover:bg-green-500/50 text-gray-200 transition-colors ${status === 'ok' ? 'selected-ok' : ''}`;
-                noErrorBtn.textContent = 'S/ Erro';
-                const errorBtn = document.createElement('button');
-                errorBtn.className = `eval-button error-btn px-3 py-1 text-xs font-bold rounded-md bg-gray-600 hover:bg-red-500/50 text-gray-200 transition-colors ${status === 'error' ? 'selected-error' : ''}`;
-                errorBtn.textContent = 'Erro';
-                buttonGroup.append(noErrorBtn, errorBtn);
+                
+                options.forEach(option => {
+                    const btn = document.createElement('button');
+                    btn.className = `eval-button px-3 py-1 text-xs font-bold rounded-md text-white transition-all duration-200 opacity-70 hover:opacity-100`;
+                    btn.textContent = option.name;
+                    btn.style.backgroundColor = option.color;
+                    btn.dataset.optionName = option.name;
+                    if (status === option.name) {
+                        btn.classList.add('selected');
+                    }
+                    buttonGroup.appendChild(btn);
+                });
+
                 const deleteBtn = document.createElement('button');
                 deleteBtn.className = 'delete-variable-btn text-gray-400 hover:text-red-400 flex-shrink-0';
                 deleteBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" /></svg>';
                 partDiv.append(input, buttonGroup, deleteBtn);
                 return partDiv;
             }
+            
+            function createOptionManagerRow(option) {
+                const row = document.createElement('div');
+                row.className = 'option-row flex items-center gap-2';
+                const colorInput = document.createElement('input');
+                colorInput.type = 'color';
+                colorInput.className = 'option-color-input';
+                colorInput.value = option.color;
+                
+                const nameInput = document.createElement('input');
+                nameInput.type = 'text';
+                nameInput.className = 'option-input flex-grow text-sm';
+                nameInput.value = option.name;
+                
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'delete-option-btn text-gray-400 hover:text-red-400';
+                deleteBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 9a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1z" clip-rule="evenodd" /></svg>';
+                
+                row.append(colorInput, nameInput, deleteBtn);
+                return row;
+            }
 
             function renderEvaluationForm(evaluations) {
                 evaluationStructure.innerHTML = '';
                 evaluations.forEach((phase) => {
                     const phaseDiv = document.createElement('div');
-                    phaseDiv.className = 'phase-section';
+                    phaseDiv.className = 'phase-section p-3 bg-gray-700/50 rounded-lg';
 
+                    // --- Phase Title ---
                     const titleContainer = document.createElement('div');
-                    titleContainer.className = 'flex items-center gap-2 mb-2';
+                    titleContainer.className = 'flex items-center gap-2 mb-3 pb-3 border-b border-gray-600';
                     const phaseInput = document.createElement('input');
                     phaseInput.type = 'text';
                     phaseInput.className = 'phase-input flex-grow';
@@ -344,39 +396,147 @@
                     deletePhaseBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>';
                     titleContainer.append(phaseInput, deletePhaseBtn);
                     
+                    // --- Option Manager ---
+                    const optionManagerContainer = document.createElement('div');
+                    optionManagerContainer.className = 'option-manager-container mb-3 p-2 bg-gray-900/50 rounded-md space-y-2';
+                    const optionTitle = document.createElement('label');
+                    optionTitle.className = 'text-xs font-semibold text-gray-400 uppercase';
+                    optionTitle.textContent = 'Opções de Avaliação';
+                    optionManagerContainer.appendChild(optionTitle);
+                    
+                    phase.options.forEach(option => {
+                        optionManagerContainer.appendChild(createOptionManagerRow(option));
+                    });
+                    
+                    const addOptionBtn = document.createElement('button');
+                    addOptionBtn.className = 'add-option-btn text-xs text-cyan-400 hover:text-cyan-300 w-full text-left pl-1';
+                    addOptionBtn.textContent = '+ Adicionar Opção';
+                    optionManagerContainer.appendChild(addOptionBtn);
+                    
+                    // --- Variables Container ---
                     const partsContainer = document.createElement('div');
                     partsContainer.className = 'parts-container space-y-2';
-                    phase.variables.forEach(variable => partsContainer.appendChild(createVariableRow(variable.name, variable.status)));
+                    phase.variables.forEach(variable => partsContainer.appendChild(createVariableRow(variable.name, variable.status, phase.options)));
                     
-                    const addBtn = document.createElement('button');
-                    addBtn.className = 'add-variable-btn mt-2 text-sm text-cyan-400 hover:text-cyan-300 w-full text-left';
-                    addBtn.textContent = '+ Adicionar Variável';
+                    const addVarBtn = document.createElement('button');
+                    addVarBtn.className = 'add-variable-btn mt-3 text-sm text-cyan-400 hover:text-cyan-300 w-full text-left';
+                    addVarBtn.textContent = '+ Adicionar Variável';
                     
-                    phaseDiv.append(titleContainer, partsContainer, addBtn);
+                    phaseDiv.append(titleContainer, optionManagerContainer, partsContainer, addVarBtn);
                     evaluationStructure.appendChild(phaseDiv);
                 });
             }
 
+            // --- Event Listeners for Dynamic Form ---
             evaluationStructure.addEventListener('click', (e) => {
                 const target = e.target;
+                
+                // Handle Evaluation Button Clicks
                 const evalButton = target.closest('.eval-button');
                 if (evalButton) {
                     const group = evalButton.parentElement;
-                    const isSelected = evalButton.classList.contains('selected-ok') || evalButton.classList.contains('selected-error');
-                    group.querySelector('.no-error-btn').classList.remove('selected-ok');
-                    group.querySelector('.error-btn').classList.remove('selected-error');
+                    const isSelected = evalButton.classList.contains('selected');
+                    
+                    // Deselect all buttons in this group
+                    group.querySelectorAll('.eval-button').forEach(btn => btn.classList.remove('selected'));
+                    
+                    // Select the clicked one, only if it wasn't already selected
                     if (!isSelected) {
-                        evalButton.classList.add(evalButton.classList.contains('no-error-btn') ? 'selected-ok' : 'selected-error');
+                        evalButton.classList.add('selected');
                     }
+                    return; // Stop event propagation
                 }
-                if (target.closest('.delete-variable-btn')) target.closest('.body-part').remove();
-                if (target.closest('.add-variable-btn')) target.closest('.add-variable-btn').previousElementSibling.appendChild(createVariableRow('Nova Variável'));
-                if (target.closest('.delete-phase-btn')) target.closest('.phase-section').remove();
+                
+                // Handle Variable Deletion
+                if (target.closest('.delete-variable-btn')) {
+                    target.closest('.body-part').remove();
+                    return;
+                }
+                
+                // Handle Variable Addition
+                if (target.closest('.add-variable-btn')) {
+                    const phaseSection = target.closest('.phase-section');
+                    const options = collectPhaseOptions(phaseSection); // Get current options for this phase
+                    target.closest('.add-variable-btn').previousElementSibling.appendChild(createVariableRow('Nova Variável', 'none', options));
+                    return;
+                }
+                
+                // Handle Phase Deletion
+                if (target.closest('.delete-phase-btn')) {
+                    target.closest('.phase-section').remove();
+                    return;
+                }
+                
+                // Handle Option Deletion
+                if (target.closest('.delete-option-btn')) {
+                    target.closest('.option-row').remove();
+                    updateAllVariableButtons(); // Update variable buttons as options changed
+                    return;
+                }
+                
+                // Handle Option Addition
+                if (target.closest('.add-option-btn')) {
+                    const newOption = { name: 'Nova Opção', color: getRandomColor() };
+                    const newRow = createOptionManagerRow(newOption);
+                    target.closest('.add-option-btn').before(newRow);
+                    updateAllVariableButtons(); // Update variable buttons as options changed
+                    return;
+                }
             });
+
+            // Update variable buttons when option names/colors change
+            evaluationStructure.addEventListener('input', (e) => {
+                const target = e.target;
+                if (target.classList.contains('option-input') || target.classList.contains('option-color-input')) {
+                    // Debounce to avoid rapid updates, especially for color picker
+                    clearTimeout(colorDebounceTimer);
+                    colorDebounceTimer = setTimeout(updateAllVariableButtons, 300);
+                }
+            });
+
+            // Re-renders all variable button groups to match the option managers
+            function updateAllVariableButtons() {
+                evaluationStructure.querySelectorAll('.phase-section').forEach(phaseEl => {
+                    const currentOptions = collectPhaseOptions(phaseEl);
+                    phaseEl.querySelectorAll('.body-part').forEach(partEl => {
+                        const currentStatus = partEl.querySelector('.eval-button.selected')?.dataset.optionName || 'none';
+                        const buttonGroup = partEl.querySelector('.button-group');
+                        buttonGroup.innerHTML = ''; // Clear existing buttons
+                        
+                        currentOptions.forEach(option => {
+                            const btn = document.createElement('button');
+                            btn.className = `eval-button px-3 py-1 text-xs font-bold rounded-md text-white transition-all duration-200 opacity-70 hover:opacity-100`;
+                            btn.textContent = option.name;
+                            btn.style.backgroundColor = option.color;
+                            btn.dataset.optionName = option.name;
+                            if (currentStatus === option.name) {
+                                btn.classList.add('selected');
+                            }
+                            buttonGroup.appendChild(btn);
+                        });
+                    });
+                });
+            }
+
+            // Helper to read options from a phase's option manager
+            function collectPhaseOptions(phaseEl) {
+                const options = [];
+                phaseEl.querySelectorAll('.option-row').forEach(rowEl => {
+                    options.push({
+                        name: rowEl.querySelector('.option-input').value,
+                        color: rowEl.querySelector('.option-color-input').value
+                    });
+                });
+                return options;
+            }
 
             addDimensionBtn.addEventListener('click', () => {
                 const currentState = collectCurrentState();
-                currentState.evaluations.push({ name: 'Nova Dimensão', variables: [{ name: 'Nova Variável', status: 'none' }] });
+                currentState.evaluations.push({ 
+                    name: 'Nova Dimensão', 
+                    options: JSON.parse(JSON.stringify(defaultOptions)), 
+                    variables: [{ name: 'Nova Variável', status: 'none' }] 
+                });
                 renderEvaluationForm(currentState.evaluations);
             });
             
@@ -390,13 +550,13 @@
                 evaluationStructure.querySelectorAll('.phase-section').forEach(phaseEl => {
                     const phaseData = {
                         name: phaseEl.querySelector('.phase-input').value,
+                        options: collectPhaseOptions(phaseEl),
                         variables: []
                     };
                     phaseEl.querySelectorAll('.body-part').forEach(partEl => {
                         const name = partEl.querySelector('.variable-input').value;
-                        let status = 'none';
-                        if(partEl.querySelector('.no-error-btn').classList.contains('selected-ok')) status = 'ok';
-                        else if(partEl.querySelector('.error-btn').classList.contains('selected-error')) status = 'error';
+                        const selectedButton = partEl.querySelector('.eval-button.selected');
+                        const status = selectedButton ? selectedButton.dataset.optionName : 'none';
                         phaseData.variables.push({ name, status });
                     });
                     state.evaluations.push(phaseData);
@@ -411,7 +571,6 @@
                 renderEvaluationForm(state.evaluations);
             }
             
-            // Initialize with default form if no media is loaded yet
             applyState(createInitialState());
 
             // --- Results Handling ---
@@ -437,19 +596,58 @@
                 resultsContent.appendChild(chartContainer);
                 if (resultsChart) resultsChart.destroy();
 
-                const chartData = { labels: [], datasets: [ { label: 'S/ Erro', data: [], backgroundColor: '#10B981', barThickness: 25 }, { label: 'Erro', data: [], backgroundColor: '#EF4444', barThickness: 25 }, { label: 'Não Avaliado', data: [], backgroundColor: '#6B7280', barThickness: 25 } ]};
+                // --- Dynamic Chart Generation ---
+                const allOptions = new Map(); // Use Map to store { name: color }
+                allOptions.set('Não Avaliado', { color: '#6B7280' }); // Add default "none"
+                
+                currentState.evaluations.forEach(phase => {
+                    phase.options.forEach(opt => {
+                        if (!allOptions.has(opt.name)) {
+                            allOptions.set(opt.name, { color: opt.color });
+                        }
+                    });
+                });
+
+                const chartLabels = currentState.evaluations.map(p => p.name);
+                const chartDatasets = Array.from(allOptions.keys()).map(optionName => ({
+                    label: optionName,
+                    data: [],
+                    backgroundColor: allOptions.get(optionName).color,
+                    barThickness: 25
+                }));
 
                 currentState.evaluations.forEach(phase => {
-                    chartData.labels.push(phase.name);
-                    const counts = { ok: 0, error: 0, none: 0 };
-                    phase.variables.forEach(item => counts[item.status]++);
-                    chartData.datasets[0].data.push(counts.ok);
-                    chartData.datasets[1].data.push(counts.error);
-                    chartData.datasets[2].data.push(counts.none);
+                    const counts = new Map(Array.from(allOptions.keys()).map(key => [key, 0]));
+                    
+                    phase.variables.forEach(item => {
+                        const status = item.status === 'none' ? 'Não Avaliado' : item.status;
+                        if (counts.has(status)) {
+                            counts.set(status, counts.get(status) + 1);
+                        }
+                    });
+                    
+                    chartDatasets.forEach(dataset => {
+                        dataset.data.push(counts.get(dataset.label));
+                    });
                 });
                 
-                resultsChart = new Chart(canvas.getContext('2d'), { type: 'bar', data: chartData, options: { responsive: true, scales: { x: { stacked: true, ticks: { color: '#D1D5DB' } }, y: { stacked: true, beginAtZero: true, ticks: { color: '#D1D5DB', stepSize: 1 } } }, plugins: { legend: { labels: { color: '#D1D5DB' } }, title: { display: true, text: 'Resumo Gráfico por Fase', color: '#D1D5DB', font: { size: 16 } } } }});
+                resultsChart = new Chart(canvas.getContext('2d'), { 
+                    type: 'bar', 
+                    data: { labels: chartLabels, datasets: chartDatasets }, 
+                    options: { 
+                        responsive: true, 
+                        scales: { 
+                            x: { stacked: true, ticks: { color: '#D1D5DB' } }, 
+                            y: { stacked: true, beginAtZero: true, ticks: { color: '#D1D5DB', stepSize: 1 } } 
+                        }, 
+                        plugins: { 
+                            legend: { labels: { color: '#D1D5DB' } }, 
+                            title: { display: true, text: 'Resumo Gráfico por Fase', color: '#D1D5DB', font: { size: 16 } } 
+                        } 
+                    }
+                });
 
+                // --- Dynamic Detailed Results ---
                 const title = document.createElement('h3');
                 title.className = "text-lg font-semibold text-cyan-300 my-4 pt-4 border-t border-gray-700";
                 title.textContent = `Resultados Detalhados para: ${mediaFiles[activeMediaIndex].name}`;
@@ -459,15 +657,19 @@
                     const phaseTitle = document.createElement('h4');
                     phaseTitle.className = "text-md font-semibold text-gray-100 mt-3";
                     phaseTitle.textContent = phase.name;
+                    
+                    const phaseOptions = new Map(phase.options.map(opt => [opt.name, opt.color]));
+                    phaseOptions.set('Não Avaliado', '#6B7280');
+                    
                     const list = document.createElement('ul');
                     list.className = 'list-disc list-inside mt-1 space-y-1 text-sm';
                     phase.variables.forEach(item => {
-                        let status;
-                        if(item.status === 'ok') status = '<span class="text-green-400 font-semibold">S/ Erro</span>';
-                        else if(item.status === 'error') status = '<span class="text-red-400 font-semibold">Erro</span>';
-                        else status = '<span class="text-gray-500">Não avaliado</span>';
+                        const statusName = item.status === 'none' ? 'Não Avaliado' : item.status;
+                        const statusColor = phaseOptions.get(statusName) || '#FFFFFF'; // Default to white if not found
+                        
                         const listItem = document.createElement('li');
-                        listItem.innerHTML = `<strong class="font-medium text-gray-300">${item.name}:</strong> ${status}`;
+                        listItem.innerHTML = `<strong class="font-medium text-gray-300">${item.name}:</strong> 
+                            <span class="font-semibold" style="color: ${statusColor}">${statusName}</span>`;
                         list.appendChild(listItem);
                     });
                     resultsContent.append(phaseTitle, list);
@@ -486,10 +688,13 @@
                 const resultsGenerated = generateResults();
                 if(resultsGenerated) {
                     resultsPanel.classList.remove('hidden');
-                    window.print();
-                    if (!evaluationPanel.classList.contains('hidden')) {
-                         resultsPanel.classList.add('hidden');
-                    }
+                    // A pequena espera garante que o gráfico tem tempo para renderizar antes de imprimir
+                    setTimeout(() => {
+                        window.print();
+                        if (!evaluationPanel.classList.contains('hidden')) {
+                            resultsPanel.classList.add('hidden');
+                        }
+                    }, 500);
                 }
             });
 
@@ -502,5 +707,3 @@
     </script>
 </body>
 </html>
-
-
